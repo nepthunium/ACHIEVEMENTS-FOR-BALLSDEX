@@ -94,6 +94,7 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
                         rewards = str(a.rewards).split(";")
                         if rewards:
                             for r in rewards:
+                                shiny = False
                                 if r.startswith("✨ "):
                                     split_r = r[2:].split()
                                     if len(split_r) > 0:
@@ -102,12 +103,7 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
                                     else:
                                         continue
                                 else:
-                                    split_r = r.split()
-                                    if len(split_r) > 0:
-                                        reward = split_r[0]
-                                        shiny = False
-                                    else:
-                                        continue
+                                    reward = r.strip()
                                 try:
                                     b = await Ball.get(country=reward)
                                     await BallInstance.create(ball=b, player=player, shiny=shiny)
