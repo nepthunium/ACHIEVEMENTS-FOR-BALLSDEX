@@ -77,3 +77,5 @@ class AchievementInstance(models.Model):
 
     def to_string(self, bot: discord.Client | None = None) -> str:
         return f"#{self.pk:0X}: {self.achievement.name}"
+
+# ADD THESE AT THE VERY END OF YOUR MODELS.PY FILE
