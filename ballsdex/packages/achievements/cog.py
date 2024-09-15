@@ -99,9 +99,11 @@ class Achievements(commands.GroupCog, group_name="achievements"):
             balls = await BallInstance.filter(**filters)
 
             def shiny_or_special(ball):
-                if ball.shiny and ball.special:
+                if ball.shiny and ball.special and ball.favorite:
+                    ball = str(ball).split(' ', 4)[4]
+                elif ball.shiny and ball.special:
                     ball = str(ball).split(' ', 3)[3]
-                elif ball.shiny or ball.special:
+                elif ball.shiny or ball.special or ball.favorite:
                     ball = str(ball).split(' ', 2)[2]
                 else:
                     ball = str(ball).split(' ', 1)[1]
