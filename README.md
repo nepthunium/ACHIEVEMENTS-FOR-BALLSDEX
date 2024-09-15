@@ -1,3 +1,6 @@
 # ACHIEVEMENTS-FOR-BALLSDEX
-ever wanted your dex to have achievements? this code does exactly that!
-**HOWEVER.** it's not fully completed yet, so i suggest you dont add this to your dex. i only created this for looking and uhh suggesting
+
+This code implements an achievement system for Ballsdex bots <br />
+It is not fully completed yet, I suggest you don't add this to your dex until i'm completed <br />
+I've only made this so you can look at it and make suggestions <br />
+That is it bye
