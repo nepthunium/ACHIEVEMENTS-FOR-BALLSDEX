@@ -1,0 +1,9 @@
+-- upgrade --
+ALTER TABLE "achievement"
+ALTER COLUMN "created_at" SET DATA TYPE TIMESTAMPTZ USING "created_at"::TIMESTAMPTZ,
+ALTER COLUMN "created_at" SET DEFAULT CURRENT_TIMESTAMP;
+-- downgrade --
+ALTER TABLE "achievement"
+ALTER COLUMN "created_at" SET DATA TYPE TIMESTAMP USING "created_at"::TIMESTAMP,
+ALTER COLUMN "created_at" SET NOT NULL,
+ALTER COLUMN "created_at" SET DEFAULT CURRENT_TIMESTAMP;
