@@ -8,14 +8,15 @@ from typing import TYPE_CHECKING, cast
 import discord
 from discord.ui import Button, Modal, TextInput, View
 from prometheus_client import Counter
-from ballsdex.core.utils.logging import log_action
+from tortoise.exceptions import DoesNotExist
 from tortoise.timezone import now as datetime_now
 
-from ballsdex.core.models import BallInstance, Player, specials, AchievementInstance, Achievement, Ball
+from ballsdex.core.models import BallInstance, GuildConfig, Player, specials, Achievement, AchievementInstance, Ball
 from ballsdex.settings import settings
-from ballsdex.core.bot import BallsDexBot
+from ballsdex.core.utils.achievements import check_if_achieved
 
 if TYPE_CHECKING:
+    from ballsdex.core.bot import BallsDexBot
     from ballsdex.core.models import Special
     from ballsdex.packages.countryballs.countryball import CountryBall
 
@@ -38,27 +39,45 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
         self.button = button
 
     async def on_error(self, interaction: discord.Interaction, error: Exception, /) -> None:
+        try:
+            config = await GuildConfig.get(guild_id=interaction.guild_id)
+        except DoesNotExist:
+            config = await GuildConfig.create(guild_id=interaction.guild_id, spawn_channel=None)
         log.exception("An error occured in countryball catching prompt", exc_info=error)
         if interaction.response.is_done():
             await interaction.followup.send(
-                f"An error occured with this {settings.collectible_name}."
+                f"An error occured with this {settings.collectible_name}.",
+                ephemeral=config.silent,
             )
         else:
             await interaction.response.send_message(
-                f"An error occured with this {settings.collectible_name}."
+                f"An error occured with this {settings.collectible_name}.",
+                ephemeral=config.silent,
             )
 
     async def on_submit(self, interaction: discord.Interaction["BallsDexBot"]):
         # TODO: use lock
+        player, created = await Player.get_or_create(discord_id=interaction.user.id)
+        try:
+            config = await GuildConfig.get(guild_id=interaction.guild_id)
+        except DoesNotExist:
+            config = await GuildConfig.create(guild_id=interaction.guild_id, spawn_channel=None)
+
         if self.ball.catched:
             await interaction.response.send_message(
-                f"{interaction.user.mention} I was caught already!"
+                f"{interaction.user.mention} I was caught already!",
+                ephemeral=config.silent,
+                allowed_mentions=discord.AllowedMentions(users=player.can_be_mentioned),
             )
             return
+
         if self.ball.model.catch_names:
             possible_names = (self.ball.name.lower(), *self.ball.model.catch_names.split(";"))
         else:
             possible_names = (self.ball.name.lower(),)
+        if self.ball.model.translations:
+            possible_names += tuple(x.lower() for x in self.ball.model.translations.split(";"))
+
         if self.name.value.lower().strip() in possible_names:
             self.ball.catched = True
             await interaction.response.defer(thinking=True)
@@ -67,30 +86,15 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
             )
 
             special = ""
-
             bot_achievements = await Achievement.all()
             for a in bot_achievements:
                 requirements = str(a.requirements).split(";")
                 filters = {"player__discord_id": interaction.user.id, "ball__country__in": requirements}
-
-                balls = await BallInstance.filter(**filters)
-
-                def shiny_or_special(ball):
-                    if ball.shiny and ball.special and ball.favorite:
-                        ball = str(ball).split(' ', 4)[4]
-                    elif ball.shiny and ball.special:
-                        ball = str(ball).split(' ', 3)[3]
-                    elif ball.shiny or ball.special or ball.favorite:
-                        ball = str(ball).split(' ', 2)[2]
-                    else:
-                        ball = str(ball).split(' ', 1)[1]
-                    return ball
-
-                balls = [shiny_or_special(ball) for ball in balls]
-
+                balls = await BallInstance.filter(**filters).select_related('ball')
+                balls = [ball.ball.country for ball in balls]
                 if all(ball in balls for ball in requirements):
-                    player = await Player.get(discord_id=interaction.user.id)
-                    has_a = await AchievementInstance.get_or_none(achievement=a, player=player)
+                    player, created = await Player.get_or_create(discord_id=interaction.user.id)
+                    has_a = await check_if_achieved(interaction.user.id, a.name)
 
                     if has_a == False:
                         rewards = str(a.rewards).split(";")
@@ -109,8 +113,9 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
                                 try:
                                     b = await Ball.get(country=reward)
                                     await BallInstance.create(ball=b, player=player, shiny=shiny)
-                                except Exception:
+                                except DoesNotExist:
                                     continue
+                        await AchievementInstance.create(achievement=a, player=player)
                         special += f"Congratulations, you just got a new achievement!: **{a.name}**\n"
             if ball.shiny:
                 special += f"✨ ***It's a shiny {settings.collectible_name}!*** ✨\n"
@@ -124,12 +129,17 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
             await interaction.followup.send(
                 f"{interaction.user.mention} You caught **{self.ball.name}!** "
                 f"`(#{ball.pk:0X}, {ball.attack_bonus:+}%/{ball.health_bonus:+}%)`\n\n"
-                f"{special}"
+                f"{special}",
+                allowed_mentions=discord.AllowedMentions(users=player.can_be_mentioned),
             )
             self.button.disabled = True
             await interaction.followup.edit_message(self.ball.message.id, view=self.button.view)
         else:
-            await interaction.response.send_message(f"{interaction.user.mention} Wrong name!")
+            await interaction.response.send_message(
+                f"{interaction.user.mention} Wrong name!",
+                allowed_mentions=discord.AllowedMentions(users=player.can_be_mentioned),
+                ephemeral=config.silent,
+            )
 
     async def catch_ball(
         self, bot: "BallsDexBot", user: discord.Member
@@ -137,8 +147,8 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
         player, created = await Player.get_or_create(discord_id=user.id)
 
         # stat may vary by +/- 20% of base stat
-        bonus_attack = random.randint(-20, 20)
-        bonus_health = random.randint(-20, 20)
+        bonus_attack = random.randint(-settings.max_attack_bonus, settings.max_attack_bonus)
+        bonus_health = random.randint(-settings.max_health_bonus, settings.max_health_bonus)
         shiny = random.randint(1, 2048) == 1
 
         # check if we can spawn cards with a special background
