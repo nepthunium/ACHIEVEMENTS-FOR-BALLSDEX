@@ -16,19 +16,12 @@ from ballsdex.core.models import (
     AchievementInstance,
     achievements
 )
+from ballsdex.core.utils.achievements import check_if_achieved
 from ballsdex.core.utils.paginator import FieldPageSource, Pages
 from ballsdex.settings import settings
 
 if TYPE_CHECKING:
     from ballsdex.core.bot import BallsDexBot
-
-async def check_if_achieved(player_id: int, achievement) -> bool:
-    a = await Achievement.get(name=achievement)
-    filters = {"player__discord_id": player_id, "achievement": a}
-    a1 = await AchievementInstance.filter(**filters)
-    if a1:
-        return True
-    return False
 
 log = logging.getLogger("ballsdex.packages.countryballs")
 
@@ -60,11 +53,9 @@ class Achievements(commands.GroupCog, group_name="achievements"):
             else:
                 owned = "⏳ Not achieved yet. ⏳"
 
-            # Check if simplified_req exists and is not empty
             if a.simplified_req:
-                requirements = f"- {a.simplified_req}"  # Use the simplified requirement
+                requirements = f"- {a.simplified_req}"
             else:
-                # Fall back to the detailed requirements if no simplified_req exists
                 requirements = str(a.requirements).split(';')
                 requirements = '\n'.join(f"- {req.strip()}" for req in requirements)
             
@@ -82,6 +73,7 @@ class Achievements(commands.GroupCog, group_name="achievements"):
         source.embed.set_thumbnail(url=avatar_url)
         pages = Pages(source=source, interaction=interaction, compact=True)
         await pages.start()
+        await interaction.followup.send("TIP: Use /achievements check to see if you have any of the above achievements!", ephemeral=True)
 
     @app_commands.command()
     async def check(self, interaction: discord.Interaction):
@@ -95,22 +87,8 @@ class Achievements(commands.GroupCog, group_name="achievements"):
         for a in bot_achievements:
             requirements = str(a.requirements).split(";")
             filters = {"player__discord_id": interaction.user.id, "ball__country__in": requirements}
-
-            balls = await BallInstance.filter(**filters)
-
-            def shiny_or_special(ball):
-                if ball.shiny and ball.special and ball.favorite:
-                    ball = str(ball).split(' ', 4)[4]
-                elif ball.shiny and ball.special:
-                    ball = str(ball).split(' ', 3)[3]
-                elif ball.shiny or ball.special or ball.favorite:
-                    ball = str(ball).split(' ', 2)[2]
-                else:
-                    ball = str(ball).split(' ', 1)[1]
-                return ball
-
-            balls = [shiny_or_special(ball) for ball in balls]
-
+            balls = await BallInstance.filter(**filters).select_related('ball')
+            balls = [ball.ball.country for ball in balls]
             if all(ball in balls for ball in requirements):
                 player = await Player.get(discord_id=interaction.user.id)
                 has_a = await check_if_achieved(interaction.user.id, a.name)
