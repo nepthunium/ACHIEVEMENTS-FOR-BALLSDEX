@@ -16,6 +16,7 @@ from ballsdex.core.models import (
     AchievementInstance,
     achievements
 )
+from ballsdex.core.utils.transformers import AchievementAchievableTransform
 from ballsdex.core.utils.achievements import check_if_achieved
 from ballsdex.core.utils.paginator import FieldPageSource, Pages
 from ballsdex.settings import settings
@@ -73,27 +74,36 @@ class Achievements(commands.GroupCog, group_name="achievements"):
         source.embed.set_thumbnail(url=avatar_url)
         pages = Pages(source=source, interaction=interaction, compact=True)
         await pages.start()
-        await interaction.followup.send("TIP: Use /achievements check to see if you have any of the above achievements!", ephemeral=True)
+        await interaction.followup.send("TIP: Use /achievements check to see if you have any achievements!", ephemeral=True)
 
     @app_commands.command()
-    async def check(self, interaction: discord.Interaction):
+    async def check(self, interaction: discord.Interaction, achievement: AchievementAchievableTransform | None = None):
         """
         Check for any missing achievements you should have.
+
+        Parameters
+        ----------
+        achievement: Achievement
+            Filter by specific achievement.
         """
-        filters = {"player__discord_id": interaction.user.id}
-        bot_achievements = await Achievement.all()
+        bot_achievements = await Achievement.all() if achievement is None else [achievement]
         message = []
+        missing_balls_set = set()
+
         await interaction.response.send_message("Checking for achievements...", ephemeral=True)
+
         for a in bot_achievements:
-            requirements = str(a.requirements).split(";")
+            requirements = set(str(a.requirements).split(";"))
             filters = {"player__discord_id": interaction.user.id, "ball__country__in": requirements}
             balls = await BallInstance.filter(**filters).select_related('ball')
-            balls = [ball.ball.country for ball in balls]
-            if all(ball in balls for ball in requirements):
+            ball_names = {ball.ball.country for ball in balls}
+            missing_balls = requirements - ball_names
+            
+            if not missing_balls:
                 player = await Player.get(discord_id=interaction.user.id)
                 has_a = await check_if_achieved(interaction.user.id, a.name)
 
-                if has_a == False:
+                if not has_a:
                     rewards = str(a.rewards).split(";")
                     if rewards:
                         for r in rewards:
@@ -114,11 +124,27 @@ class Achievements(commands.GroupCog, group_name="achievements"):
                                 continue
                     await AchievementInstance.create(achievement=a, player=player)
                     message.append(f"Found and gave missing achievement: **{a.name}**\n")
-        
+            else:
+                missing_balls_set.update(missing_balls)
+
+        if missing_balls_set and achievement:
+            nonemsg = (f"You have not met the requirements for the achievement **{achievement}**! You still need these {settings.plural_collectible_name}:\n" + 
+                    '\n'.join(missing_balls_set))
+        else:
+            if achievement is None:
+                nonemsg = "No new achievements found."
+            else:
+                has_a = await check_if_achieved(interaction.user.id, achievement.name)
+                if has_a:
+                    nonemsg = "You already have this achievement!"
+                else:
+                    nonemsg = "No new achievements found."
+
         if message:
             await interaction.followup.send("\n".join(message), ephemeral=True)
         else:
-            await interaction.followup.send("No new achievements found.", ephemeral=True)
+            await interaction.followup.send(nonemsg, ephemeral=True)
+
         
     @rewards.command(name="list")
     async def rewards_list(self, interaction: discord.Interaction):
@@ -158,3 +184,45 @@ class Achievements(commands.GroupCog, group_name="achievements"):
         source.embed.set_thumbnail(url=avatar_url)
         pages = Pages(source=source, interaction=interaction, compact=True)
         await pages.start()
+
+    @app_commands.command()
+    async def search(self, interaction: discord.Interaction, keyword: str):
+        """
+        Search for achievements by keyword.
+
+        Parameters:
+        keyword: str
+            The keyword you want to search by.
+        """
+        achievements = await Achievement.filter(achievable=True)
+        results = [a for a in achievements if keyword.lower() in a.name.lower()]
+
+        entries = []
+        for a in results:
+            result = await check_if_achieved(interaction.user.id, a.name)
+            if result == True:
+                owned = "👑 Achieved! 👑"
+            else:
+                owned = "⏳ Not achieved yet. ⏳"
+
+            if a.simplified_req:
+                requirements = f"- {a.simplified_req}"
+            else:
+                requirements = str(a.requirements).split(';')
+                requirements = '\n'.join(f"- {req.strip()}" for req in requirements)
+            
+            entries.append((f"**{a.name} ({owned}):**", f"Requirements:\n{requirements}"))
+        
+        if len(entries) == 0:
+            await interaction.response.send_message("No achievements found.", ephemeral=True)
+            return
+        
+        avatar_url = interaction.user.avatar.url if interaction.user.avatar else DEFAULT_AVATAR_URL
+        
+        source = FieldPageSource(entries, per_page=1, inline=False, clear_description=False)
+        source.embed.description = f"**Search Results** (searched: {keyword})"
+        source.embed.colour = discord.Colour.blurple()
+        source.embed.set_thumbnail(url=avatar_url)
+        pages = Pages(source=source, interaction=interaction, compact=True)
+        await pages.start()
+        await interaction.followup.send("TIP: Use /achievements check to see if you have any achievements!", ephemeral=True)
