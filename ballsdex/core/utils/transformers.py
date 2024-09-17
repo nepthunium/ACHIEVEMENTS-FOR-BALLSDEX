@@ -5,7 +5,8 @@ from ballsdex.core.models import (
 __all__ = (
     "AchievementTransform",
     "AchievementAchievableTransformer",
-) # add these to your exist __all__ list
+) # add these to your existing __all__ list
+
 class AchievementTransformer(TTLModelTransformer[Achievement]):
     name = "achievement"
     model = Achievement()
