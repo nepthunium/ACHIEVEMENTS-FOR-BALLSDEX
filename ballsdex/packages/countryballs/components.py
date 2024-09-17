@@ -88,15 +88,17 @@ class CountryballNamePrompt(Modal, title=f"Catch this {settings.collectible_name
             special = ""
             bot_achievements = await Achievement.all()
             for a in bot_achievements:
-                requirements = str(a.requirements).split(";")
+                requirements = set(str(a.requirements).split(";"))
                 filters = {"player__discord_id": interaction.user.id, "ball__country__in": requirements}
                 balls = await BallInstance.filter(**filters).select_related('ball')
-                balls = [ball.ball.country for ball in balls]
-                if all(ball in balls for ball in requirements):
-                    player, created = await Player.get_or_create(discord_id=interaction.user.id)
+                ball_names = {ball.ball.country for ball in balls}
+                missing_balls = requirements - ball_names
+                
+                if not missing_balls:
+                    player = await Player.get(discord_id=interaction.user.id)
                     has_a = await check_if_achieved(interaction.user.id, a.name)
 
-                    if has_a == False:
+                    if not has_a:
                         rewards = str(a.rewards).split(";")
                         if rewards:
                             for r in rewards:
